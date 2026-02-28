@@ -1,0 +1,17 @@
+<body>
+  <h1 style="text-align: center; padding: 10px">
+  <span id="result"></span>
+  <!-- Include jQuery library -->
+  <script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+  <script>
+    // Function to fetch and update the timer
+    function update_timer() {
+      $.getJSON('/_timer', function(data) {
+        $("#result").text(data.result);
+      });
+    }
+    // Call the function every second (1000 milliseconds)
+    setInterval(update_timer, 1000);
+  </script>
+  </h1>
+</body>
