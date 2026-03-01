@@ -32,12 +32,13 @@ margin_ratio = 0.10
 mx, my = int(sw * margin_ratio), int(sh * margin_ratio)
 xmin, xmax = mx, sw - mx
 ymin, ymax = my, sh - my
+threshold = 150
 
-OFF_MS = 5000
+OFF_MS = 10000
 ON_MS = 50
 
 RESET_AFTER_OFFSCREEN = 30.0
-ALARM_AFTER_S = 5.0
+ALARM_AFTER_S = 10.0
 RETURN_DEBOUNCE_S = 0.05 # idk what this is for but chat said it would help
 
 focus_accum_s = 0.0
@@ -49,7 +50,7 @@ inside_since = None
 
 cap = cv2.VideoCapture(0)
 
-# courtesy of le chat meow
+# courtesy of le chat meow MEOWWWWWWWW :3
 def format_hms(seconds: float) -> str:
     s = int(seconds)
     h = s // 3600
@@ -73,7 +74,7 @@ try:
         else:
             x, y = est.predict(np.array([features]))[0]
             x, y = float(x), float(y)
-            outside = (x < xmin) or (x > xmax) or (y < ymin) or (y > ymax)
+            outside = (x < xmin - threshold) or (x > xmax + threshold) or (y < ymin - threshold) or (y > ymax + threshold)
 
         if outside:
             inside_since = None
