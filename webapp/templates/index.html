@@ -1,17 +1,89 @@
+<head>
+  <title>Screaming Pomodoro</title>
+  <link rel="stylesheet" href="{{url_for('.static', filename='styles.css')}}">
+  <!-- <script src="https://code.jquery.com"></script> -->
+</head>
 <body>
   <h1 style="text-align: center; padding: 10px">
-  <span id="result"></span>
-  <!-- Include jQuery library -->
+  <span id="timer_display">--:--</span></h1>
   <script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
-  <script>
+
+  <div class="container">
+    <button id="startButton" onclick="startTimer()">Start</button>
+    <button id="stopButton" onclick="stopTimer()">Stop</button>
+
+    <script>
+      let intervalId;
+
+      function startTimer() {
+        const startButton = document.getElementById("startButton");
+        startButton.disabled = true;
+        const stopButton = document.getElementById("stopButton");
+        stopButton.disabled = false;
+
+        $.post('/start_timer', function(data) {
+            console.log(data.status);
+            if (data.status === 'Timer started') {
+                // Update the display every second
+                intervalId = setInterval(updateDisplay, 1000); 
+            }
+        });
+      }
+
+      function stopTimer() {
+        const stopButton = document.getElementById("stopButton");
+        stopButton.disabled = true;
+        const startButton = document.getElementById("startButton");
+        startButton.disabled = false;
+
+        $.post('/stop_timer', function(data) {
+            // clearInterval(intervalId);
+            console.log(data.status);
+            if (data.status === 'Timer stopped') {
+                clearInterval(intervalId);
+                intervalId = null;
+                $('#timer_display').text(data.duration);
+            }
+        });
+      }
+
+      function updateDisplay() {
+        $.get('/run_timer', function(data) {
+            $('#timer_display').text(data.elapsed);
+        });
+      }
+    </script>
+  </div>
+
+  <!-- Include jQuery library -->
+  <!-- <script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script> -->
+  <!-- <script>
     // Function to fetch and update the timer
     function update_timer() {
-      $.getJSON('/_timer', function(data) {
-        $("#result").text(data.result);
-      });
+      const button = document.getElementById("startButton");
+      if (button.textContent == "Stop") {
+        $.getJSON('/_timer', function(data) {
+          $("#result").text(data.result);
+        });
+      }
     }
     // Call the function every second (1000 milliseconds)
     setInterval(update_timer, 1000);
   </script>
-  </h1>
+  </h1> -->
+
+  <!-- <div class="container">
+    <button id="startButton" onclick="changeText()">Start</button>
+    <script>
+      function changeText() {
+        const button = document.getElementById("startButton");
+        if (button.textContent == "Start") {
+          button.textContent = "Stop";
+        }
+        else {
+          button.textContent = "Start";
+        }
+      }
+    </script>
+  </div> -->
 </body>

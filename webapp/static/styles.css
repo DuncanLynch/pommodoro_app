@@ -1,0 +1,7 @@
+.container {
+    /* display: flex; */
+    text-align: center;
+    justify-content: center;
+    align-items: center;
+    /* height: 100vh;           Optional: Centers in the full viewport height */
+}

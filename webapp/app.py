@@ -4,7 +4,6 @@ import time
 app = Flask(__name__)
 app.secret_key = "change-this-secret-key"
 
-start_time = time.time()
 duration = 60   # set your timer duration in seconds
 
 # Demo credentials; replace with real user storage later.
@@ -46,16 +45,44 @@ def logout():
 def index():
     if "user" not in session:
         return redirect(url_for("login"))
+    session['duration'] = duration
     return render_template("index.html")
 
 
-@app.route("/_timer")
-def timer():
-    if "user" not in session:
-        return jsonify({"error": "Unauthorized"}), 401
-    elapsed = time.time() - start_time
-    remaining = max(0, duration - int(elapsed))
-    return jsonify({"result": remaining})
+@app.route("/start_timer", methods=['POST'])
+def start_timer():
+    session['timer_running'] = True
+    session['start_time'] = time.time()
+    return jsonify({"status": "Timer started"})
+
+
+@app.route("/run_timer", methods=['GET'])
+def run_timer():
+    if 'timer_running' in session and session['timer_running']:
+        elapsed = time.time() - session['start_time']
+        remaining = max(0, session['duration'] - int(elapsed))
+        
+        minutes = int(remaining // 60)
+        seconds = int(remaining % 60)
+        remaining = f"{minutes:02d}:{seconds:02d}"
+
+        session['remaining'] = remaining
+        return jsonify({"elapsed": remaining})
+
+
+@app.route("/stop_timer", methods=['POST'])
+def stop_timer():
+    print("STOP TIMER")
+    if 'timer_running' in session and session['timer_running']:
+        session['timer_running'] = False
+
+        # If you want the timer to continue instead of resetting, uncomment this:
+        # session['duration'] = session['remaining']
+
+        minutes = int(session['duration'] // 60)
+        seconds = int(session['duration'] % 60)
+        duration_formatted = f"{minutes:02d}:{seconds:02d}"
+        return jsonify({"status": "Timer stopped", "duration": duration_formatted})
 
 
 if __name__ == "__main__":

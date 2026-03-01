@@ -1,0 +1,39 @@
+<head>
+  <title>Screaming Pomodoro</title>
+  <link rel="stylesheet" href="{{url_for('.static', filename='styles.css')}}">
+</head>
+<body>
+  <h1 style="text-align: center; padding: 10px">
+  <span id="result"></span>
+  <!-- Include jQuery library -->
+  <script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+  <script>
+    // Function to fetch and update the timer
+    function update_timer() {
+      const button = document.getElementById("startButton");
+      if (button.textContent == "Stop") {
+        $.getJSON('/_timer', function(data) {
+          $("#result").text(data.result);
+        });
+      }
+    }
+    // Call the function every second (1000 milliseconds)
+    setInterval(update_timer, 1000);
+  </script>
+  </h1>
+
+  <div class="container">
+    <button id="startButton" onclick="changeText()">Start</button>
+    <script>
+      function changeText() {
+        const button = document.getElementById("startButton");
+        if (button.textContent == "Start") {
+          button.textContent = "Stop";
+        }
+        else {
+          button.textContent = "Start";
+        }
+      }
+    </script>
+  </div>
+</body>
