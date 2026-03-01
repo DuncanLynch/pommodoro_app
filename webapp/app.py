@@ -1,10 +1,11 @@
 from flask import Flask, render_template, jsonify, request, redirect, url_for, session
 import time
+from datetime import datetime, timezone
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
 from werkzeug.security import generate_password_hash, check_password_hash
-from pymongo import MongoClient
 from urllib.parse import quote_plus
+from bson import ObjectId
 
 username = "pomodorro"
 password = ""
@@ -145,6 +146,91 @@ def timer():
     elapsed = time.time() - start_time
     remaining = max(0, duration - int(elapsed))
     return jsonify({"result": remaining})
+
+
+@app.route("/start_session", methods=["POST"])
+def start_session():
+    username = session["user"]
+    now_utc = datetime.now(timezone.utc)
+    session_id = str(ObjectId())
+
+    study_session = {
+        "session_id": session_id,
+        "started_at": now_utc,
+        "started_at_iso": now_utc.isoformat(),
+        "started_at_epoch": int(now_utc.timestamp()),
+        "status": "started",
+    }
+
+    result = users.update_one(
+        {"username": username},
+        {"$push": {"study_sessions": study_session}},
+    )
+
+    if result.matched_count == 0:
+        return jsonify({"error": "User not found"}), 404
+
+    return jsonify(
+        {
+            "message": "Study session started",
+            "username": username,
+            "session_id": session_id,
+            "started_at": study_session["started_at_iso"],
+        }
+    ), 201
+
+
+@app.route("/end_session", methods=["POST"])
+def end_session():
+    username = session["user"]
+    now_utc = datetime.now(timezone.utc)
+    now_epoch = int(now_utc.timestamp())
+
+    user = users.find_one({"username": username}, {"study_sessions": 1})
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    study_sessions = user.get("study_sessions", [])
+    active_session = None
+    for s in reversed(study_sessions):
+        if s.get("status") == "started" and "ended_at_epoch" not in s:
+            active_session = s
+            break
+
+    if not active_session:
+        return jsonify({"error": "No active session found"}), 404
+
+    started_at_epoch = active_session.get("started_at_epoch")
+    if started_at_epoch is None:
+        return jsonify({"error": "Active session missing start time"}), 400
+
+    total_seconds = max(0, now_epoch - int(started_at_epoch))
+
+    result = users.update_one(
+        {"username": username, "study_sessions.session_id": active_session["session_id"]},
+        {
+            "$set": {
+                "study_sessions.$.ended_at": now_utc,
+                "study_sessions.$.ended_at_iso": now_utc.isoformat(),
+                "study_sessions.$.ended_at_epoch": now_epoch,
+                "study_sessions.$.total_session_seconds": total_seconds,
+                "study_sessions.$.status": "ended",
+            }
+        },
+    )
+
+    if result.matched_count == 0:
+        return jsonify({"error": "Active session no longer available"}), 409
+
+    return jsonify(
+        {
+            "message": "Study session ended",
+            "username": username,
+            "session_id": active_session["session_id"],
+            "ended_at": now_utc.isoformat(),
+            "total_session_seconds": total_seconds,
+        }
+    ), 200
 
 
 if __name__ == "__main__":
