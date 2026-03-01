@@ -9,39 +9,73 @@ import threading
 from eyetrax import GazeEstimator, run_9_point_calibration
 from eyetrax.utils.screen import get_screen_size
 
-pygame.mixer.init()
-pygame.mixer.music.set_volume(1.0)
-
 def resource_path(rel):
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, rel)
 
+
 ALARM_PATH = resource_path("sound.mp3")
 CHEER_PATH = resource_path("cheer.mp3")
 
+_AUDIO_READY = False
+_ALARM_SOUND = None
+_CHEER_SOUND = None
+_ALARM_CHANNEL = None
+_CHEER_CHANNEL = None
+
+
+def init_audio():
+    global _AUDIO_READY, _ALARM_SOUND, _CHEER_SOUND
+    if _AUDIO_READY:
+        return True
+
+    try:
+        if not pygame.get_init():
+            pygame.init()
+        if not pygame.mixer.get_init():
+            pygame.mixer.pre_init(44100, -16, 2, 512)
+            pygame.mixer.init()
+
+        _ALARM_SOUND = pygame.mixer.Sound(ALARM_PATH)
+        _CHEER_SOUND = pygame.mixer.Sound(CHEER_PATH)
+        _ALARM_SOUND.set_volume(0.1)
+        _CHEER_SOUND.set_volume(0.7)
+        _AUDIO_READY = True
+        return True
+    except Exception as exc:
+        print(f"[audio] Failed to initialize audio: {exc}")
+        _AUDIO_READY = False
+        return False
+
 
 def start_alarm():
-    if not pygame.mixer.music.get_busy():
-        pygame.mixer.music.load(ALARM_PATH)
-        pygame.mixer.music.set_volume(0.35)
-        pygame.mixer.music.play(-1)
+    global _ALARM_CHANNEL
+    if not init_audio():
+        return
+    if _CHEER_CHANNEL is not None and _CHEER_CHANNEL.get_busy():
+        _CHEER_CHANNEL.stop()
+    if _ALARM_CHANNEL is None or not _ALARM_CHANNEL.get_busy():
+        _ALARM_CHANNEL = _ALARM_SOUND.play(loops=-1)
 
 
 def stop_alarm():
-    if pygame.mixer.music.get_busy():
-        pygame.mixer.music.stop()
+    if _ALARM_CHANNEL is not None and _ALARM_CHANNEL.get_busy():
+        _ALARM_CHANNEL.stop()
 
 
 def start_cheer():
-    if not pygame.mixer.music.get_busy():
-        pygame.mixer.music.load(CHEER_PATH)
-        pygame.mixer.music.set_volume(0.7)
-        pygame.mixer.music.play(-1)
+    global _CHEER_CHANNEL
+    if not init_audio():
+        return
+    if _ALARM_CHANNEL is not None and _ALARM_CHANNEL.get_busy():
+        _ALARM_CHANNEL.stop()
+    if _CHEER_CHANNEL is None or not _CHEER_CHANNEL.get_busy():
+        _CHEER_CHANNEL = _CHEER_SOUND.play(loops=0)
 
 
 def stop_cheer():
-    if pygame.mixer.music.get_busy():
-        pygame.mixer.music.stop()
+    if _CHEER_CHANNEL is not None and _CHEER_CHANNEL.get_busy():
+        _CHEER_CHANNEL.stop()
 
 
 est = GazeEstimator()
@@ -91,15 +125,34 @@ class App:
         self._worker = None
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
+        self._cap_lock = threading.Lock()
+        self._cap = None
 
     def stop(self):
         self._stop_event.set()
+        stop_alarm()
+        stop_cheer()
+
+        with self._cap_lock:
+            if self._cap is not None:
+                self._cap.release()
+                self._cap = None
+
+        worker = self._worker
+        if worker is not None and worker.is_alive() and worker is not threading.current_thread():
+            worker.join(timeout=2.5)
 
         with self._lock:
             self.state = self.states["wait"]
             self.end_time = time.monotonic()
             if self.start_time:
                 self.elapsed_time = max(0.0, self.end_time - self.start_time)
+            self.screen_status = "UNKNOWN"
+            self.last_gaze = None
+            self.offscreen_for_s = 0.0
+
+        if worker is not None and not worker.is_alive():
+            self._worker = None
 
         # TODO request logic here
 
@@ -108,6 +161,8 @@ class App:
             return
 
         self._stop_event.clear()
+        stop_alarm()
+        stop_cheer()
 
         with self._lock:
             self.state = self.states["study"]
@@ -121,30 +176,61 @@ class App:
 
         # TODO request logic here
 
-        self._worker = threading.Thread(target=self.run, daemon=True)
+        self._worker = threading.Thread(target=self.pomoduro, daemon=True)
         self._worker.start()
 
     def pomoduro(self):
-        while True:
-            self.run()
+        try:
+            while not self._stop_event.is_set():
+                with self._lock:
+                    self.state = self.states["study"]
+                    self.start_time = time.monotonic()
+                    self.end_time = 0.0
+                    self.elapsed_time = 0.0
+                    self.screen_status = "UNKNOWN"
+                    self.last_gaze = None
+                    self.offscreen_for_s = 0.0
+
+                study_completed = self.run()
+                if self._stop_event.is_set() or not study_completed:
+                    break
+
+                with self._lock:
+                    self.state = self.states["break"]
+                    self.start_time = time.monotonic()
+                    self.end_time = 0.0
+                    self.elapsed_time = 0.0
+                    self.screen_status = "BREAK"
+                    self.last_gaze = None
+                    self.offscreen_for_s = 0.0
+
+                start_cheer()
+                break_completed = self.chill()
+                stop_cheer()
+
+                if self._stop_event.is_set() or not break_completed:
+                    break
+        finally:
+            stop_alarm()
+            stop_cheer()
             with self._lock:
-                self.state = self.states["break"]
-            self.chill()
-            with self._lock:
-                self.state = self.states["study"]
+                if self.state != self.states["wait"]:
+                    self.state = self.states["wait"]
+                    self.end_time = time.monotonic()
+            self._worker = None
 
     def chill(self):
+        phase_start = time.monotonic()
         while True:
             if self._stop_event.is_set():
-                return
+                return False
 
             now = time.monotonic()
             with self._lock:
-                if self.start_time:
-                    self.elapsed_time = max(0.0, now - self.start_time)
+                self.elapsed_time = max(0.0, now - phase_start)
 
-            if now - self.start_time > POMO_BREAK_DUR_M * 60:
-                return
+            if now - phase_start >= POMO_BREAK_DUR_M * 60:
+                return True
 
             time.sleep(0.05)
 
@@ -156,21 +242,28 @@ class App:
         outside_since = None
         inside_since = None
 
+        with self._lock:
+            phase_start = self.start_time or time.monotonic()
+            if not self.start_time:
+                self.start_time = phase_start
+
         cap = cv2.VideoCapture(0)
+        with self._cap_lock:
+            self._cap = cap
 
         try:
             while True:
                 if self._stop_event.is_set():
-                    return
+                    return False
 
                 now = time.monotonic()
                 with self._lock:
-                    if self.start_time:
-                        self.elapsed_time = max(0.0, now - self.start_time)
+                    self.elapsed_time = max(0.0, now - phase_start)
 
-                # optional: end after study duration
-                if now - self.start_time > POMO_STUDY_DUR_M * 60:
-                    return
+                if now - phase_start >= POMO_STUDY_DUR_M * 60:
+                    with self._lock:
+                        self.end_time = now
+                    return True
 
                 ok, frame = cap.read()
                 if not ok:
@@ -224,10 +317,6 @@ class App:
                     if not is_offscreen and focus_start is None:
                         focus_start = now
 
-                focus_total = focus_accum_s
-                if focus_start is not None:
-                    focus_total += (now - focus_start)
-
                 # update GUI-visible fields safely
                 with self._lock:
                     self.screen_status = "OFFSCREEN" if is_offscreen else "ONSCREEN"
@@ -241,8 +330,10 @@ class App:
             pass
         finally:
             stop_alarm()
+            with self._cap_lock:
+                if self._cap is cap:
+                    self._cap = None
             cap.release()
-            pygame.mixer.quit()
 
 
 def draw_button(screen, rect, label, font, enabled=True):
@@ -257,6 +348,7 @@ def draw_button(screen, rect, label, font, enabled=True):
 
 def run_gui(app: App):
     pygame.init()
+    init_audio()
     screen = pygame.display.set_mode((620, 260))
     pygame.display.set_caption("Focus Timer Controls")
     clock = pygame.time.Clock()
@@ -281,6 +373,15 @@ def run_gui(app: App):
                 elif stop_btn.collidepoint(mx, my):
                     app.stop()
 
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_a:
+                    start_alarm()
+                elif event.key == pygame.K_c:
+                    start_cheer()
+                elif event.key == pygame.K_s:
+                    stop_alarm()
+                    stop_cheer()
+
         with app._lock:
             state = app.state
             st = app.start_time
@@ -301,12 +402,19 @@ def run_gui(app: App):
         screen.blit(title, (20, y))
         y += 22
 
+        if st:
+            elapsed_label = "Break elapsed" if state == app.states["break"] else "Study elapsed" if state == app.states["study"] else "Elapsed"
+            elapsed_line = f"{elapsed_label}: {format_hms(el)} ({el:0.1f}s)"
+        else:
+            elapsed_line = "Elapsed: -"
+
         lines = [
             f"State: {state}",
             f"Status: {status}" + (f"  (off for {off_for:0.1f}s)" if status == "OFFSCREEN" else ""),
             f"Start time (monotonic): {st:.3f}" if st else "Start time (monotonic): -",
             f"End time (monotonic):   {et:.3f}" if et else "End time (monotonic): -",
-            f"Elapsed: {format_hms(el)} ({el:0.1f}s)" if st else "Elapsed: -",
+            elapsed_line,
+            "Sound test hotkeys: A=alarm, C=cheer, S=stop",
         ]
 
         if gaze is None:
@@ -323,6 +431,10 @@ def run_gui(app: App):
         pygame.display.flip()
         clock.tick(30)
 
+    stop_alarm()
+    stop_cheer()
+    if pygame.mixer.get_init():
+        pygame.mixer.quit()
     pygame.quit()
 
 
