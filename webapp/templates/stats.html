@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Study Stats</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div class="brand">Study Stats</div>
+      <nav class="nav-links">
+        <a href="/">Timer</a>
+        <a href="/logout">Logout</a>
+      </nav>
+    </header>
+
+    <section class="card stats-header">
+      <h1 class="stats-title">Progress for {{ username }}</h1>
+      <p class="muted">Latest 10 completed sessions</p>
+      <div class="stats-grid">
+        <article class="stat-item">
+          <div class="stat-label">Sessions Shown</div>
+          <div class="stat-value">{{ session_count }}</div>
+        </article>
+        <article class="stat-item">
+          <div class="stat-label">Total Time</div>
+          <div class="stat-value">{{ total_hms }}</div>
+        </article>
+        <article class="stat-item">
+          <div class="stat-label">Average Time</div>
+          <div class="stat-value">{{ avg_hms }}</div>
+        </article>
+      </div>
+    </section>
+
+    <section class="card table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Session ID</th>
+            <th>Started</th>
+            <th>Ended</th>
+            <th>Duration (HH:MM:SS)</th>
+            <th>Duration (Seconds)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if sessions %}
+            {% for s in sessions %}
+              <tr>
+                <td>{{ s.session_id }}</td>
+                <td>{{ s.started_at }}</td>
+                <td>{{ s.ended_at }}</td>
+                <td>{{ s.duration_hms }}</td>
+                <td>{{ s.duration_seconds }}</td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="5">No completed sessions yet.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </section>
+  </div>
+</body>
+</html>
