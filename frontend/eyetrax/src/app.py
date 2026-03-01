@@ -33,7 +33,7 @@ mx, my = int(sw * margin_ratio), int(sh * margin_ratio)
 xmin, xmax = mx, sw - mx
 ymin, ymax = my, sh - my
 
-OFF_MS = 1500
+OFF_MS = 5000
 ON_MS = 50
 
 is_offscreen = False
