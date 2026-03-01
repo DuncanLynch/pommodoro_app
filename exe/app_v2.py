@@ -19,6 +19,11 @@ def resource_path(rel):
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, rel)
 
+IP = "localhost"
+PORT = "3000"
+API_BASE_URL = f"http://{IP}:{PORT}"
+API_TIMEOUT_S = 3.0
+
 
 ALARM_PATH = resource_path("sound.mp3")
 CHEER_PATH = resource_path("cheer.mp3")
@@ -137,6 +142,19 @@ def brighten(color, delta):
         clamp(color[1] + delta, 0, 255),
         clamp(color[2] + delta, 0, 255),
     )
+
+
+def fit_text(font, text, max_w):
+    if max_w <= 0:
+        return ""
+    if font.size(text)[0] <= max_w:
+        return text
+    suffix = "..."
+    for idx in range(len(text), -1, -1):
+        candidate = text[:idx] + suffix
+        if font.size(candidate)[0] <= max_w:
+            return candidate
+    return suffix
 
 
 def enable_windows_dpi_awareness():
@@ -303,6 +321,8 @@ class AppSnapshot:
     alarm_after_s: float
     reset_after_s: float
     muted: bool
+    loggedin: bool
+    auth_status: str
 
 class App:
     def __init__(self):
@@ -310,6 +330,11 @@ class App:
 
         self.session = requests.Session()
         self.loggedin = False
+        self.auth_username = ""
+        self.auth_password = ""
+        self.auth_status = "Not logged in"
+        self.api_base_url = API_BASE_URL
+        self.api_timeout_s = API_TIMEOUT_S
 
         self.study_duration_s = 25 * 60
         self.break_duration_s = 5 * 60
@@ -346,6 +371,68 @@ class App:
     def _worker_alive_unlocked(self):
         return self._worker is not None and self._worker.is_alive()
 
+    def _safe_post(self, endpoint, payload=None, require_login=True):
+        if require_login and not self.loggedin:
+            return False, "Not logged in"
+
+        try:
+            response = self.session.post(
+                f"{self.api_base_url}{endpoint}",
+                json=payload,
+                timeout=self.api_timeout_s,
+            )
+        except requests.RequestException as exc:
+            return False, f"Network error: {exc}"
+
+        if response.status_code >= 400:
+            if response.status_code in (401, 403):
+                self.loggedin = False
+            detail = ""
+            try:
+                body = response.json()
+                detail = body.get("error") or body.get("message") or ""
+            except ValueError:
+                detail = response.text.strip()
+            detail = detail[:120]
+            if detail:
+                return False, f"HTTP {response.status_code}: {detail}"
+            return False, f"HTTP {response.status_code}"
+        return True, "OK"
+
+    def login(self, username, password):
+        username = (username or "").strip()
+        password = password or ""
+        self.auth_username = username
+        self.auth_password = password
+
+        if not username or not password:
+            self.loggedin = False
+            self.auth_status = "Username and password required"
+            return False
+
+        ok, message = self._safe_post(
+            "/login",
+            payload={"username": username, "password": password},
+            require_login=False,
+        )
+        if ok:
+            self.loggedin = True
+            self.auth_status = f"Logged in as {username}"
+            return True
+
+        self.loggedin = False
+        self.auth_status = f"Login failed: {message}"
+        return False
+
+    def _post_session_event(self, endpoint):
+        if not self.loggedin:
+            self.auth_status = "Not logged in; session sync skipped"
+            return False
+        ok, message = self._safe_post(endpoint, require_login=False)
+        if not ok:
+            self.auth_status = f"Sync failed: {message}"
+        return ok
+
     def start(self):
         with self._lock:
             if self._worker_alive_unlocked():
@@ -367,6 +454,7 @@ class App:
             self.last_cam_rgb = None
 
         self._worker = threading.Thread(target=self._pomodoro_loop, daemon=True)
+        self._post_session_event("/start_session")
         self._worker.start()
 
     def stop(self):
@@ -392,6 +480,7 @@ class App:
             self.last_gaze = None
             self.offscreen_for_s = 0.0
             self.last_cam_rgb = None
+        self._post_session_event("/end_session")
 
         if worker is not None and not worker.is_alive():
             self._worker = None
@@ -467,6 +556,8 @@ class App:
                 alarm_after_s=self.alarm_after_s,
                 reset_after_s=self.reset_after_s,
                 muted=self.audio.muted,
+                loggedin=self.loggedin,
+                auth_status=self.auth_status,
             )
 
     def _begin_phase(self, state, duration_s):
@@ -646,6 +737,7 @@ def build_buttons(snapshot):
     settings = pygame.Rect(UI_MARGIN, SETTINGS_Y, WINDOW_W - (UI_MARGIN * 2), SETTINGS_H)
 
     buttons = [
+        ButtonSpec("login", pygame.Rect(header.right - 630, header.y + 28, 80, 42), "Reauth" if snapshot.loggedin else "Login", "secondary", True),
         ButtonSpec("start", pygame.Rect(header.right - 540, header.y + 28, 120, 42), "Start", "primary", not snapshot.running),
         ButtonSpec("stop", pygame.Rect(header.right - 410, header.y + 28, 120, 42), "Stop", "danger", snapshot.running),
         ButtonSpec("reset", pygame.Rect(header.right - 280, header.y + 28, 120, 42), "Reset", "secondary", not snapshot.running),
@@ -673,7 +765,9 @@ def build_buttons(snapshot):
     return buttons
 
 
-def handle_button(app, key):
+def handle_button(app, key, username="", password=""):
+    app.auth_username = username
+    app.auth_password = password
     if key == "start":
         app.start()
     elif key == "stop":
@@ -700,6 +794,8 @@ def handle_button(app, key):
         app.adjust_reset_after(-5)
     elif key == "reset_plus":
         app.adjust_reset_after(5)
+    elif key == "login":
+        app.login(username, password)
 
 
 def run_gui(app):
@@ -723,15 +819,47 @@ def run_gui(app):
     font_value = pygame.font.SysFont("Consolas", 24, bold=True)
 
     ui_running = True
+    username_input = app.auth_username
+    password_input = app.auth_password
+    active_field = None
+
     while ui_running:
         snapshot = app.snapshot()
         buttons = build_buttons(snapshot)
         mouse = pygame.mouse.get_pos()
 
+        header_rect = pygame.Rect(UI_MARGIN, HEADER_Y, WINDOW_W - (UI_MARGIN * 2), HEADER_H)
+        main_rect = pygame.Rect(UI_MARGIN, MAIN_Y, 730, MAIN_H)
+        status_rect = pygame.Rect(770, MAIN_Y, WINDOW_W - 794, MAIN_H)
+        settings_rect = pygame.Rect(UI_MARGIN, SETTINGS_Y, WINDOW_W - (UI_MARGIN * 2), SETTINGS_H)
+        username_rect = pygame.Rect(header_rect.x + 210, header_rect.y + 24, 150, 30)
+        password_rect = pygame.Rect(header_rect.x + 368, header_rect.y + 24, 150, 30)
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 ui_running = False
             elif event.type == pygame.KEYDOWN:
+                if active_field is not None:
+                    if event.key == pygame.K_TAB:
+                        active_field = "password" if active_field == "username" else "username"
+                    elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                        handle_button(app, "login", username_input, password_input)
+                    elif event.key == pygame.K_ESCAPE:
+                        active_field = None
+                    elif event.key == pygame.K_BACKSPACE:
+                        if active_field == "username":
+                            username_input = username_input[:-1]
+                        else:
+                            password_input = password_input[:-1]
+                    else:
+                        typed = event.unicode
+                        if typed and typed.isprintable():
+                            if active_field == "username" and len(username_input) < 48:
+                                username_input += typed
+                            elif active_field == "password" and len(password_input) < 64:
+                                password_input += typed
+                    continue
+
                 if event.key == pygame.K_ESCAPE:
                     ui_running = False
                 elif event.key == pygame.K_SPACE:
@@ -746,18 +874,22 @@ def run_gui(app):
                 elif event.key == pygame.K_r:
                     app.reset_stats()
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if username_rect.collidepoint(event.pos):
+                    active_field = "username"
+                    continue
+                if password_rect.collidepoint(event.pos):
+                    active_field = "password"
+                    continue
+                active_field = None
                 for button in buttons:
                     if button.enabled and button.rect.collidepoint(event.pos):
-                        handle_button(app, button.key)
+                        handle_button(app, button.key, username_input, password_input)
                         break
+        app.auth_username = username_input
+        app.auth_password = password_input
 
         screen.blit(background, (0, 0))
         draw_ambient_orbs(screen, time.monotonic())
-
-        header_rect = pygame.Rect(UI_MARGIN, HEADER_Y, WINDOW_W - (UI_MARGIN * 2), HEADER_H)
-        main_rect = pygame.Rect(UI_MARGIN, MAIN_Y, 730, MAIN_H)
-        status_rect = pygame.Rect(770, MAIN_Y, WINDOW_W - 794, MAIN_H)
-        settings_rect = pygame.Rect(UI_MARGIN, SETTINGS_Y, WINDOW_W - (UI_MARGIN * 2), SETTINGS_H)
 
         draw_card(screen, header_rect, COL_CARD, COL_BORDER)
         draw_card(screen, main_rect, COL_CARD_ALT, COL_BORDER)
@@ -766,6 +898,29 @@ def run_gui(app):
 
         title = font_title.render("Pomo", True, COL_TEXT)
         screen.blit(title, (header_rect.x + 24, header_rect.y + 16))
+
+        user_fill = (20, 30, 46) if active_field == "username" else (18, 27, 44)
+        pass_fill = (20, 30, 46) if active_field == "password" else (18, 27, 44)
+        user_border = COL_ACCENT if active_field == "username" else (69, 90, 130)
+        pass_border = COL_ACCENT if active_field == "password" else (69, 90, 130)
+        pygame.draw.rect(screen, user_fill, username_rect, border_radius=8)
+        pygame.draw.rect(screen, user_border, username_rect, width=2, border_radius=8)
+        pygame.draw.rect(screen, pass_fill, password_rect, border_radius=8)
+        pygame.draw.rect(screen, pass_border, password_rect, width=2, border_radius=8)
+
+        shown_username = username_input if username_input else "username"
+        shown_password = ("*" * len(password_input)) if password_input else "password"
+        user_color = COL_TEXT if username_input else COL_TEXT_DIM
+        pass_color = COL_TEXT if password_input else COL_TEXT_DIM
+        user_text = font_small.render(shown_username, True, user_color)
+        pass_text = font_small.render(shown_password, True, pass_color)
+        screen.blit(user_text, (username_rect.x + 8, username_rect.y + (username_rect.h - user_text.get_height()) // 2))
+        screen.blit(pass_text, (password_rect.x + 8, password_rect.y + (password_rect.h - pass_text.get_height()) // 2))
+
+        auth_color = COL_ACCENT_2 if snapshot.loggedin else COL_WARNING
+        auth_status = fit_text(font_small, snapshot.auth_status, 330)
+        auth_text = font_small.render(auth_status, True, auth_color)
+        screen.blit(auth_text, (header_rect.x + 210, header_rect.y + 62))
 
         for button in buttons:
             draw_button(screen, button, font_small, button.rect.collidepoint(mouse))
@@ -863,7 +1018,7 @@ def run_gui(app):
             vtxt = font_value.render(value, True, COL_TEXT)
             screen.blit(vtxt, (value_rect.x + (value_rect.w - vtxt.get_width()) // 2, value_rect.y + (value_rect.h - vtxt.get_height()) // 2))
 
-        hotkeys = font_small.render("Hotkeys: Space start/stop  |  M mute  |  T test sound  |  R reset stats  |  Esc quit", True, COL_TEXT_DIM)
+        hotkeys = font_small.render("Hotkeys: Space start/stop | M mute | T test sound | R reset | Tab switch login field | Enter login", True, COL_TEXT_DIM)
         screen.blit(hotkeys, (UI_MARGIN, WINDOW_H - hotkeys.get_height() - 6))
 
         if snapshot.muted:
