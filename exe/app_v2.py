@@ -157,6 +157,7 @@ class App:
             self.last_cam_rgb = None
             self.last_cam_ts = 0.0
 
+
         if worker is not None and not worker.is_alive():
             self._worker = None
 
