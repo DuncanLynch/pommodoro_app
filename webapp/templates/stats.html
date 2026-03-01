@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Study Stats</title>
+</head>
+<body style="font-family: Arial, sans-serif; margin: 24px;">
+  <div style="margin-bottom: 16px;">
+    <a href="/">Timer</a> |
+    <a href="/logout">Logout</a>
+  </div>
+
+  <h1>Study Stats</h1>
+  <p>User: <strong>{{ username }}</strong></p>
+  <p>Sessions shown: <strong>{{ session_count }}</strong> (latest 10 completed sessions)</p>
+  <p>Total time: <strong>{{ total_hms }}</strong> ({{ total_seconds }} seconds)</p>
+  <p>Average time: <strong>{{ avg_hms }}</strong> ({{ avg_seconds }} seconds)</p>
+
+  <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; max-width: 960px;">
+    <thead>
+      <tr>
+        <th>Session ID</th>
+        <th>Started</th>
+        <th>Ended</th>
+        <th>Duration (HH:MM:SS)</th>
+        <th>Duration (Seconds)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if sessions %}
+        {% for s in sessions %}
+          <tr>
+            <td>{{ s.session_id }}</td>
+            <td>{{ s.started_at }}</td>
+            <td>{{ s.ended_at }}</td>
+            <td>{{ s.duration_hms }}</td>
+            <td>{{ s.duration_seconds }}</td>
+          </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="5">No completed sessions yet.</td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</body>
+</html>

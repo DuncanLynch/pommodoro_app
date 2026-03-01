@@ -8,7 +8,7 @@ from urllib.parse import quote_plus
 from bson import ObjectId
 
 username = "pomodorro"
-password = ""
+password = "$Cr34m{}LOUD"
 
 uri = f"mongodb+srv://{username}:{quote_plus(password)}@trivia-app.h6q9oau.mongodb.net/?appName=trivia-app"
 
@@ -231,6 +231,57 @@ def end_session():
             "total_session_seconds": total_seconds,
         }
     ), 200
+
+
+@app.route("/stats")
+def stats():
+    username = session["user"]
+    user = users.find_one({"username": username}, {"study_sessions": 1, "_id": 0})
+    if not user:
+        return "User not found", 404
+
+    all_sessions = user.get("study_sessions", [])
+    completed_sessions = [
+        s
+        for s in all_sessions
+        if s.get("status") == "ended" and s.get("total_session_seconds") is not None
+    ]
+    completed_sessions.sort(key=lambda s: s.get("ended_at_epoch", 0), reverse=True)
+    latest_10 = completed_sessions[:10]
+
+    total_seconds = sum(int(s.get("total_session_seconds", 0)) for s in latest_10)
+    count = len(latest_10)
+    avg_seconds = int(total_seconds / count) if count else 0
+
+    def format_seconds(seconds):
+        seconds = int(seconds)
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        secs = seconds % 60
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+    rows = []
+    for s in latest_10:
+        rows.append(
+            {
+                "session_id": s.get("session_id", ""),
+                "started_at": s.get("started_at_iso", "N/A"),
+                "ended_at": s.get("ended_at_iso", "N/A"),
+                "duration_seconds": int(s.get("total_session_seconds", 0)),
+                "duration_hms": format_seconds(s.get("total_session_seconds", 0)),
+            }
+        )
+
+    return render_template(
+        "stats.html",
+        username=username,
+        sessions=rows,
+        session_count=count,
+        total_seconds=total_seconds,
+        total_hms=format_seconds(total_seconds),
+        avg_seconds=avg_seconds,
+        avg_hms=format_seconds(avg_seconds),
+    )
 
 
 if __name__ == "__main__":
