@@ -1,21 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pomodoro Timer</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
 <body>
-  <div style="padding: 10px; text-align: center;">
-    <a href="/stats">View Stats</a> |
-    <a href="/logout">Logout</a>
+  <div class="page">
+    <header class="topbar">
+      <div class="brand">Pomodoro Focus</div>
+      <nav class="nav-links">
+        <a href="/stats">View Stats</a>
+        <a href="/logout">Logout</a>
+      </nav>
+    </header>
+
+    <main class="card timer-card">
+      <p class="timer-title">Welcome</p>
+      <h1 class="timer-value">Ready To Focus?</h1>
+      <p class="muted">This is your study dashboard. Use Stats to review your recent sessions.</p>
+    </main>
   </div>
-  <h1 style="text-align: center; padding: 10px">
-  <span id="result"></span>
-  <!-- Include jQuery library -->
-  <script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
-  <script>
-    // Function to fetch and update the timer
-    function update_timer() {
-      $.getJSON('/_timer', function(data) {
-        $("#result").text(data.result);
-      });
-    }
-    // Call the function every second (1000 milliseconds)
-    setInterval(update_timer, 1000);
-  </script>
-  </h1>
 </body>
+</html>
