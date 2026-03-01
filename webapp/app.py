@@ -7,10 +7,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import quote_plus
 from bson import ObjectId
 
-username = "pomodorro"
-password = "$Cr34m{}LOUD"
-
-uri = f"mongodb+srv://{username}:{quote_plus(password)}@trivia-app.h6q9oau.mongodb.net/?appName=trivia-app"
+envfile = open("env.txt", "r")
+uri = str(envfile.read())   
 
 client = MongoClient(uri, serverSelectionTimeoutMS=8000)
 
@@ -62,30 +60,32 @@ def require_auth_for_protected_routes():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if "user" in session:
+        if request.is_json:
+            return jsonify({"message": "Already logged in", "username": session["user"]}), 200
         return redirect(url_for("index"))
 
+    error = None
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
+        if request.is_json:
+            body = request.get_json(silent=True) or {}
+            username = str(body.get("username", "")).strip()
+            password = str(body.get("password", ""))
+        else:
+            username = request.form.get("username", "").strip()
+            password = request.form.get("password", "")
 
         user = users.find_one({"username": username})
         if user and check_password_hash(user["password_hash"], password):
             session["user"] = username
+            if request.is_json:
+                return jsonify({"message": "Login successful", "username": username}), 200
             return redirect(url_for("index"))
 
-        return "Invalid username or password", 401
+        if request.is_json:
+            return jsonify({"error": "Invalid username or password"}), 401
+        error = "Invalid username or password."
 
-    return """
-    <h2>Login</h2>
-    <form method="post">
-      <label>Username</label><br>
-      <input name="username" type="text" required><br><br>
-      <label>Password</label><br>
-      <input name="password" type="password" required><br><br>
-      <button type="submit">Login</button>
-    </form>
-    <p>Don't have an account? <a href="/signup">Sign up</a></p>
-    """
+    return render_template("login.html", error=error)
 
 
 @app.route("/logout")

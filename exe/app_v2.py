@@ -20,7 +20,7 @@ def resource_path(rel):
     return os.path.join(base, rel)
 
 IP = "localhost"
-PORT = "3000"
+PORT = "5000"
 API_BASE_URL = f"http://{IP}:{PORT}"
 API_TIMEOUT_S = 3.0
 
@@ -805,7 +805,7 @@ def run_gui(app):
     app.audio.initialize()
 
     screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
-    pygame.display.set_caption("EyeFocus Pomodoro")
+    pygame.display.set_caption("Pomo")
     clock = pygame.time.Clock()
 
     background = build_gradient_surface(WINDOW_W, WINDOW_H, COL_BG_TOP, COL_BG_BOTTOM)
